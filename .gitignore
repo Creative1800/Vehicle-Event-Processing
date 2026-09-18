@@ -1,0 +1,22 @@
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Maven (arrives later)
+target/
+
+# Java
+*.class
+hs_err_pid*
+replay_pid*
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
