@@ -23,8 +23,20 @@ public final class CameraRegistry {
         this.locationNames = locationNames;
     }
 
+    /**
+     * Builds a registry from maps already in memory.
+     *
+     * Same seam as Watchlist.of: it is what makes this class usable from a test, from a
+     * Flink task, or from a database loader. Map.copyOf takes defensive copies.
+     */
+    public static CameraRegistry of(Map<String, String> cameraToLocation,
+                                    Map<String, String> locationNames) {
+        return new CameraRegistry(Map.copyOf(cameraToLocation), Map.copyOf(locationNames));
+    }
+
+    /** Parses the two CSVs, then hands the maps to of(). */
     public static CameraRegistry loadFrom(Path camerasFile, Path locationsFile) throws IOException {
-        return new CameraRegistry(readKeyValue(camerasFile), readKeyValue(locationsFile));
+        return of(readKeyValue(camerasFile), readKeyValue(locationsFile));
     }
 
     /** Returns null when the camera is not in the registry. */

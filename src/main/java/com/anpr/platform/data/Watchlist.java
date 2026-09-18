@@ -3,6 +3,7 @@ package com.anpr.platform.data;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -22,6 +23,30 @@ public final class Watchlist {
         this.plates = plates;
     }
 
+    /**
+     * Builds a watchlist from plates listed inline - the form a test wants.
+     *
+     * Note Set.copyOf(Arrays.asList(...)) rather than Set.of(...): Set.of throws
+     * IllegalArgumentException when handed a duplicate, and a caller listing the same
+     * plate twice is a harmless mistake, not something worth crashing over.
+     */
+    public static Watchlist of(String... plates) {
+        return of(Set.copyOf(Arrays.asList(plates)));
+    }
+
+    /**
+     * Builds a watchlist from a set already in memory.
+     *
+     * The seam that keeps this class testable, and the way a Flink job or a database
+     * loader will build one without going through a local file. Set.copyOf takes a
+     * defensive copy, so a watchlist cannot be changed by whoever handed the plates over.
+     * Order is not preserved, and a watchlist has no meaningful order to lose.
+     */
+    public static Watchlist of(Set<String> plates) {
+        return new Watchlist(Set.copyOf(plates));
+    }
+
+    /** Parses the CSV, then hands the plates to of(). */
     public static Watchlist loadFrom(Path file) throws IOException {
         List<String> lines = Files.readAllLines(file);
 
@@ -30,7 +55,7 @@ public final class Watchlist {
             plates.add(lines.get(i).split(",")[0]);
         }
 
-        return new Watchlist(plates);
+        return of(plates);
     }
 
     public boolean contains(String plate) {

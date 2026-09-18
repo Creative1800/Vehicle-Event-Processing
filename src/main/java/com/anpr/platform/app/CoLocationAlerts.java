@@ -16,7 +16,9 @@ import java.util.List;
  * through CoLocationDetector, and prints whatever comes back.
  *
  * All the logic lives in the detector. This class only does I/O and formatting, which is
- * what makes the detector testable - and what will let a Flink job reuse it unchanged.
+ * what makes the detector testable. The Flink job will not reuse the detector itself -
+ * Flink replaces its HashMap state with keyed state and its own windows - but the rules
+ * it encodes, and the tests around them, carry over.
  */
 public final class CoLocationAlerts {
 
