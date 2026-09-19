@@ -1,18 +1,15 @@
 package com.anpr.platform.app;
 
+import com.anpr.platform.config.KafkaProducerConfig;
 import com.anpr.platform.model.AnprEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
-import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.common.serialization.StringSerializer;
 
 import java.util.List;
-import java.util.Properties;
 
 import static com.anpr.platform.config.KafkaTopics.ANPR_EVENTS;
-import static com.anpr.platform.config.KafkaTopics.BOOTSTRAP_SERVERS;
 import static com.anpr.platform.data.EnrichedSampleEvents.enrichedSampleEvents;
 
 /**
@@ -32,7 +29,7 @@ public final class AnprEventPublisher {
 
         int published = 0;
 
-        try (Producer<String, String> producer = new KafkaProducer<>(producerConfig())) {
+        try (Producer<String, String> producer = new KafkaProducer<>(KafkaProducerConfig.properties())) {
             for (AnprEvent event : events) {
                 String json = mapper.writeValueAsString(event);
 
@@ -44,15 +41,6 @@ public final class AnprEventPublisher {
         }
 
         System.out.println("Published " + published + " events to " + ANPR_EVENTS);
-    }
-
-    /** Properties, not ProducerConfig: the constants name the keys, they don't build the object. */
-    private static Properties producerConfig() {
-        Properties props = new Properties();
-        props.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS);
-        props.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
-        props.setProperty(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
-        return props;
     }
 
     private AnprEventPublisher() {
