@@ -1,17 +1,16 @@
 package com.anpr.platform.correlate;
 
-import com.anpr.platform.data.CameraRegistry;
-import com.anpr.platform.data.DetectionReader;
-import com.anpr.platform.data.SampleData;
-import com.anpr.platform.data.Watchlist;
+import com.anpr.platform.config.KafkaTopics;
 import com.anpr.platform.model.AnprEvent;
 import com.anpr.platform.model.CoLocationAlertEvent;
-import com.anpr.platform.model.Detection;
+import com.anpr.platform.serde.AnprEventDeserializationSchema;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.state.v2.ValueState;
 import org.apache.flink.api.common.state.v2.ValueStateDescriptor;
 import org.apache.flink.api.common.typeinfo.Types;
+import org.apache.flink.connector.kafka.source.KafkaSource;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
@@ -19,7 +18,6 @@ import org.apache.flink.streaming.api.windowing.assigners.SlidingEventTimeWindow
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.util.Collector;
 
-import java.io.IOException;
 import java.time.Duration;
 import java.util.*;
 
@@ -27,8 +25,6 @@ import java.util.*;
 /**
  * The Flink half of the design: CO_LOCATION alerts, the only alert that needs state over
  * time. SINGLE_MATCH never reaches here - NiFi raises it on the spot.
- *
- * Reads a bounded in-memory source for now. The Kafka source replaces exactly one line.
  */
 public final class CoLocationJob {
 
@@ -40,6 +36,8 @@ public final class CoLocationJob {
 
     private static final int MIN_DISTINCT_PLATES = 2;
 
+    private static final String CONSUMER_GROUP = "colocation-job";
+
     public static void main(String[] args) throws Exception {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -48,16 +46,13 @@ public final class CoLocationJob {
         // correct at any parallelism - locations simply spread across more subtasks.
         env.setParallelism(1);
 
+        KafkaSource<AnprEvent> source = anprEventSource();
+
         WatermarkStrategy<AnprEvent> watermarks = WatermarkStrategy
                 .<AnprEvent>forBoundedOutOfOrderness(OUT_OF_ORDERNESS)
                 .withTimestampAssigner((event, recordTimestamp) -> event.eventTimeMillis);
 
-        env.fromData(enrichedSampleEvents())
-
-                // Event time, not processing time: a replay of old data must still produce
-                // the alerts that data implies, whatever the wall clock says.
-                .assignTimestampsAndWatermarks(watermarks)
-
+        env.fromSource(source, watermarks, KafkaTopics.ANPR_EVENTS)
                 // NiFi already decided this. Filtering early keeps uninteresting traffic
                 // out of the windows entirely.
                 .filter(event -> event.watchlisted)
@@ -130,35 +125,6 @@ public final class CoLocationJob {
         }
     }
 
-    /**
-     * Stands in for NiFi: reads the sample CSVs and does the enrichment NiFi will do -
-     * resolve the camera to a location, and flag whether the plate is watchlisted.
-     *
-     * This whole method disappears when Kafka arrives; a KafkaSource replaces it.
-     */
-    private static List<AnprEvent> enrichedSampleEvents() throws IOException {
-        Watchlist watchlist = Watchlist.loadFrom(SampleData.WATCHLIST);
-        CameraRegistry cameras = CameraRegistry.loadFrom(SampleData.CAMERAS, SampleData.LOCATIONS);
-
-        List<AnprEvent> events = new ArrayList<>();
-
-        for (Detection detection : DetectionReader.readAll(SampleData.DETECTIONS)) {
-            String locationId = cameras.locationIdOf(detection.cameraId());
-            if (locationId == null) {
-                continue;
-            }
-
-            events.add(new AnprEvent(
-                    detection.id(),
-                    detection.plate(),
-                    detection.cameraId(),
-                    locationId,
-                    watchlist.contains(detection.plate()),
-                    detection.timestamp().toEpochMilli()));
-        }
-
-        return events;
-    }
 
     /**
      * Lets the FIRST alert for an incident through and swallows every later window that
@@ -240,5 +206,20 @@ public final class CoLocationJob {
         private static long expiryOf(long windowEndMillis) {
             return windowEndMillis + WINDOW_SIZE.toMillis();
         }
+
+    }
+
+    private static KafkaSource<AnprEvent> anprEventSource() {
+        return KafkaSource.<AnprEvent>builder()
+            .setBootstrapServers(KafkaTopics.BOOTSTRAP_SERVERS)
+            .setTopics(KafkaTopics.ANPR_EVENTS)
+            .setGroupId(CONSUMER_GROUP)
+            // Start at the live edge: a running job reports what is happening now,
+            // not a replay of what was already in the topic.
+            .setStartingOffsets(OffsetsInitializer.latest())
+            // Only the value matters - event time comes from inside the JSON,
+            // not from the Kafka record's key or timestamp.
+            .setValueOnlyDeserializer(new AnprEventDeserializationSchema())
+            .build();
     }
 }
