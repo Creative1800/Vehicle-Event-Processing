@@ -21,12 +21,8 @@ import org.apache.flink.util.Collector;
 
 import java.io.IOException;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
-import static org.apache.commons.lang3.ObjectUtils.max;
 
 /**
  * The Flink half of the design: CO_LOCATION alerts, the only alert that needs state over
@@ -176,21 +172,17 @@ public final class CoLocationJob {
             extends KeyedProcessFunction<String, CoLocationAlertEvent, CoLocationAlertEvent> {
 
         /**
-         * The latest window end seen for this incident, or null if we have not alerted on
-         * it yet. That null is the whole test, which is why this is a Long and not a long.
-         *
-         * transient because a ValueState is a handle into a running state backend: it
-         * cannot exist on the client where this object is constructed, only on the worker
-         * where it runs.
+         * Latest window end seen for this incident, null if none yet - that null is the
+         * test, hence Long rather than long. transient because a ValueState only exists on
+         * the worker, and per-incident data cannot be a plain field: one instance of this
+         * class serves every incident.
          */
         private transient ValueState<Long> lastWindowEnd;
 
         /**
-         * Not the constructor: this object is built on the client, serialized, shipped,
-         * and only then initialised. There is no RuntimeContext until that has happened.
-         *
-         * OpenContext, not Configuration - the old signature was removed in Flink 2.x, and
-         * without @Override the wrong one compiles quietly and simply never runs.
+         * Not the constructor: this object is built on the client and shipped, so there is
+         * no RuntimeContext until it starts. OpenContext, not Configuration - the old
+         * signature was removed in Flink 2.x.
          */
         @Override
         public void open(OpenContext openContext) {
@@ -202,22 +194,51 @@ public final class CoLocationJob {
         public void processElement(CoLocationAlertEvent alert,
                                    Context context,
                                    Collector<CoLocationAlertEvent> out) throws Exception {
-            // Read once. Every call to value() hits the state backend, and holding the
-            // result in a local also keeps the two branches genuinely exclusive - the
-            // stored value changes underneath you the moment update() is called.
-            Long lastWindowEndValue = lastWindowEnd.value();
 
-            // Nothing stored means no alert has been raised for this incident yet.
-            if(lastWindowEndValue == null) {
+            Long lastSeen = lastWindowEnd.value();
+
+            if (lastSeen == null) {
+                // no alert has been raised for this incident yet.
                 out.collect(alert);
                 lastWindowEnd.update(alert.windowEndMillis);
-            } else {
-                // A later overlapping window reporting the same incident. Stay silent, but
-                // remember how far the evidence now reaches - step 4 expires the state
-                // from this value. max rather than plain assignment because windows are
-                // not guaranteed to arrive in end-time order above parallelism 1.
-                lastWindowEnd.update(max(lastWindowEndValue, alert.windowEndMillis));
+                context.timerService().registerEventTimeTimer(expiryOf(alert.windowEndMillis));
+                return;
             }
+
+            long extended = Math.max(lastSeen, alert.windowEndMillis);
+
+            if (extended == lastSeen) {
+                // Evidence reaches no further, so the standing timer is still the right one.
+                return;
+            }
+
+            // Delete before registering: Flink keeps two timers at different timestamps,
+            // and the earlier one would clear the state mid-incident.
+            context.timerService().deleteEventTimeTimer(expiryOf(lastSeen));
+            lastWindowEnd.update(extended);
+            context.timerService().registerEventTimeTimer(expiryOf(extended));
+        }
+
+        /**
+         * Fires once no further window can report this incident. Clearing rather than
+         * marking it alerted: the same plates meeting again later is a new incident.
+         * Emits nothing - the alert went out on first sighting.
+         */
+        @Override
+        public void onTimer(long timestamp,
+                            OnTimerContext context,
+                            Collector<CoLocationAlertEvent> out) throws Exception {
+            lastWindowEnd.clear();
+        }
+
+        /**
+         * When an incident may be forgotten: one window after the last window that
+         * reported it. The extra window is margin - a timer at the window end itself
+         * races that window's own output. Register and delete both call this, so their
+         * timestamps cannot drift apart.
+         */
+        private static long expiryOf(long windowEndMillis) {
+            return windowEndMillis + WINDOW_SIZE.toMillis();
         }
     }
 }
