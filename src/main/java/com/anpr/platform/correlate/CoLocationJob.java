@@ -8,8 +8,12 @@ import com.anpr.platform.model.AnprEvent;
 import com.anpr.platform.model.CoLocationAlertEvent;
 import com.anpr.platform.model.Detection;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.functions.OpenContext;
+import org.apache.flink.api.common.state.v2.ValueState;
+import org.apache.flink.api.common.state.v2.ValueStateDescriptor;
 import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
 import org.apache.flink.streaming.api.windowing.assigners.SlidingEventTimeWindows;
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
@@ -21,6 +25,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+
+import static org.apache.commons.lang3.ObjectUtils.max;
 
 /**
  * The Flink half of the design: CO_LOCATION alerts, the only alert that needs state over
@@ -71,6 +77,21 @@ public final class CoLocationJob {
                 .window(SlidingEventTimeWindows.of(WINDOW_SIZE, WINDOW_SLIDE))
 
                 .process(new CoLocationWindow())
+
+                // The stream stops being keyed by LOCATION here and starts being keyed by
+                // INCIDENT. Every overlapping window that reported the same plates at the
+                // same place collapses onto one key, which is what makes the repeats
+                // recognisable as repeats.
+                .keyBy(CoLocationAlertEvent::dedupeKey)
+
+                // Flink 2.2 builds this operator on the async state backend, so it has to
+                // be handed the matching store explicitly - without this the state lookup
+                // in open() lands in the synchronous store and is refused at startup. It
+                // also fixes the state API: v2 descriptors, not v1.
+                .enableAsyncState()
+
+                // Ensures the alert is emitted only once per incident
+                .process(new EmitOncePerIncident())
 
                 .print();
 
@@ -141,5 +162,62 @@ public final class CoLocationJob {
         }
 
         return events;
+    }
+
+    /**
+     * Lets the FIRST alert for an incident through and swallows every later window that
+     * reports the same one. This is what turns 25 printed alerts into 2.
+     *
+     * Keyed by incident rather than by location - see the second keyBy above. The window
+     * operator decides whether plates were co-located; this one decides whether we have
+     * already said so.
+     */
+    private static final class EmitOncePerIncident
+            extends KeyedProcessFunction<String, CoLocationAlertEvent, CoLocationAlertEvent> {
+
+        /**
+         * The latest window end seen for this incident, or null if we have not alerted on
+         * it yet. That null is the whole test, which is why this is a Long and not a long.
+         *
+         * transient because a ValueState is a handle into a running state backend: it
+         * cannot exist on the client where this object is constructed, only on the worker
+         * where it runs.
+         */
+        private transient ValueState<Long> lastWindowEnd;
+
+        /**
+         * Not the constructor: this object is built on the client, serialized, shipped,
+         * and only then initialised. There is no RuntimeContext until that has happened.
+         *
+         * OpenContext, not Configuration - the old signature was removed in Flink 2.x, and
+         * without @Override the wrong one compiles quietly and simply never runs.
+         */
+        @Override
+        public void open(OpenContext openContext) {
+            lastWindowEnd = getRuntimeContext()
+                    .getState(new ValueStateDescriptor<>("lastWindowEnd", Long.class));
+        }
+
+        @Override
+        public void processElement(CoLocationAlertEvent alert,
+                                   Context context,
+                                   Collector<CoLocationAlertEvent> out) throws Exception {
+            // Read once. Every call to value() hits the state backend, and holding the
+            // result in a local also keeps the two branches genuinely exclusive - the
+            // stored value changes underneath you the moment update() is called.
+            Long lastWindowEndValue = lastWindowEnd.value();
+
+            // Nothing stored means no alert has been raised for this incident yet.
+            if(lastWindowEndValue == null) {
+                out.collect(alert);
+                lastWindowEnd.update(alert.windowEndMillis);
+            } else {
+                // A later overlapping window reporting the same incident. Stay silent, but
+                // remember how far the evidence now reaches - step 4 expires the state
+                // from this value. max rather than plain assignment because windows are
+                // not guaranteed to arrive in end-time order above parallelism 1.
+                lastWindowEnd.update(max(lastWindowEndValue, alert.windowEndMillis));
+            }
+        }
     }
 }
