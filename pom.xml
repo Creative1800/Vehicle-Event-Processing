@@ -24,9 +24,36 @@
     -->
     <flink.version>2.2.1</flink.version>
     <junit.version>5.10.2</junit.version>
+
+    <!--
+      The Kafka connector ships on its own release train: 5.0.0-2.2 means connector 5.0.0
+      built for Flink 2.2. This is the pairing the flink.version above exists to satisfy.
+    -->
+    <flink.kafka.version>5.0.0-2.2</flink.kafka.version>
+
+    <!--
+      Matches the version Flink shades internally. Flink ships only flink-shaded-jackson,
+      relocated under org.apache.flink.shaded.jackson2 and not meant for application code,
+      so a real Jackson has to be declared rather than borrowed.
+    -->
+    <jackson.version>2.18.2</jackson.version>
   </properties>
 
   <dependencies>
+    <!-- KafkaSource and KafkaSink: the buffer between NiFi and this job. -->
+    <dependency>
+      <groupId>org.apache.flink</groupId>
+      <artifactId>flink-connector-kafka</artifactId>
+      <version>${flink.kafka.version}</version>
+    </dependency>
+
+    <!-- Reads and writes the JSON that travels on the topics. -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
+
     <!--
       The DataStream API: event time, watermarks, keyBy, windows.
       compile scope, not provided: this job has to run with plain `java -jar` and from

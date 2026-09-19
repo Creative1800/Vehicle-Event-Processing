@@ -60,7 +60,7 @@ public final class CoLocationJob {
 
                 // NiFi already decided this. Filtering early keeps uninteresting traffic
                 // out of the windows entirely.
-                .filter(event -> event.isWatchlisted)
+                .filter(event -> event.watchlisted)
 
                 // Types.STRING is not decoration: a Java lambda loses its generic types to
                 // erasure, so Flink cannot always infer the key type. Stating it avoids a

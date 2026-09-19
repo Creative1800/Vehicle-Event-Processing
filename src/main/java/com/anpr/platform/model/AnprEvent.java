@@ -21,7 +21,7 @@ public class AnprEvent {
     public String plate;
     public String cameraId;
     public String locationId;
-    public boolean isWatchlisted;
+    public boolean watchlisted;
 
     /** Event time, as epoch millis - when the camera saw the vehicle. */
     public long eventTimeMillis;
@@ -31,12 +31,12 @@ public class AnprEvent {
     }
 
     public AnprEvent(String eventId, String plate, String cameraId, String locationId,
-                     boolean isWatchlisted, long eventTimeMillis) {
+                     boolean watchlisted, long eventTimeMillis) {
         this.eventId = eventId;
         this.plate = plate;
         this.cameraId = cameraId;
         this.locationId = locationId;
-        this.isWatchlisted = isWatchlisted;
+        this.watchlisted = watchlisted;
         this.eventTimeMillis = eventTimeMillis;
     }
 
@@ -44,6 +44,6 @@ public class AnprEvent {
     public String toString() {
         return plate + "@" + cameraId + "/" + locationId
                 + " " + Instant.ofEpochMilli(eventTimeMillis)
-                + (isWatchlisted ? " [watchlisted]" : "");
+                + (watchlisted ? " [watchlisted]" : "");
     }
 }
