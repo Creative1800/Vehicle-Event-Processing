@@ -5,6 +5,7 @@ import com.anpr.platform.data.DetectionReader;
 import com.anpr.platform.data.SampleData;
 import com.anpr.platform.data.Watchlist;
 import com.anpr.platform.model.AnprEvent;
+import com.anpr.platform.model.CoLocationAlertEvent;
 import com.anpr.platform.model.Detection;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.typeinfo.Types;
@@ -16,7 +17,6 @@ import org.apache.flink.util.Collector;
 
 import java.io.IOException;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -84,13 +84,13 @@ public final class CoLocationJob {
      * the window already IS the answer, so this only has to count distinct plates.
      */
     private static final class CoLocationWindow
-            extends ProcessWindowFunction<AnprEvent, String, String, TimeWindow> {
+            extends ProcessWindowFunction<AnprEvent, CoLocationAlertEvent, String, TimeWindow> {
 
         @Override
         public void process(String locationId,
                             Context context,
                             Iterable<AnprEvent> events,
-                            Collector<String> out) {
+                            Collector<CoLocationAlertEvent> out) {
 
             Set<String> plates = new LinkedHashSet<>();
             Set<String> cameras = new LinkedHashSet<>();
@@ -104,11 +104,12 @@ public final class CoLocationJob {
                 return;
             }
 
-            out.collect("ALERT  CO_LOCATION  " + plates
-                    + "  at " + locationId
-                    + "  seen by " + cameras
-                    + "  window [" + Instant.ofEpochMilli(context.window().getStart())
-                    + " .. " + Instant.ofEpochMilli(context.window().getEnd()) + ")");
+            out.collect(new CoLocationAlertEvent(
+                            locationId,
+                            plates,
+                            cameras,
+                            context.window().getStart(),
+                            context.window().getEnd()));
         }
     }
 

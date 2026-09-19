@@ -7,8 +7,12 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Two or more DIFFERENT vehicles of interest seen at one location inside the same
- * time window.
+ * A CO_LOCATION finding as the plain-Java prototype models it: two or more DIFFERENT
+ * vehicles of interest seen at one location inside the same time window.
+ *
+ * CoLocationAlertEvent is the same finding in the form the Flink job emits. The two exist
+ * separately because this one can be a record - immutable, with its invariants checked in
+ * one place - and a streaming alert cannot.
  *
  * Carries a locationId rather than the location's name. The name is for humans reading
  * output, so whoever prints an alert looks it up in the CameraRegistry - that keeps
