@@ -16,20 +16,61 @@
     <!-- Compile against the Java 17 API, not just Java 17 syntax. -->
     <maven.compiler.release>17</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+    <!--
+      2.2.1 rather than the newer 2.3.0 on purpose: the Kafka connector is released
+      separately, and its newest build (5.0.0-2.2) targets Flink 2.2. Matching them
+      avoids betting on cross-version compatibility later.
+    -->
+    <flink.version>2.2.1</flink.version>
+    <junit.version>5.10.2</junit.version>
   </properties>
 
   <dependencies>
+    <!--
+      The DataStream API: event time, watermarks, keyBy, windows.
+      compile scope, not provided: this job has to run with plain `java -jar` and from
+      the IDE, not only after being submitted to a Flink cluster.
+    -->
+    <dependency>
+      <groupId>org.apache.flink</groupId>
+      <artifactId>flink-streaming-java</artifactId>
+      <version>${flink.version}</version>
+    </dependency>
+
+    <!-- Lets main() start a local MiniCluster, which is what makes the job debuggable. -->
+    <dependency>
+      <groupId>org.apache.flink</groupId>
+      <artifactId>flink-clients</artifactId>
+      <version>${flink.version}</version>
+    </dependency>
+
+    <!--
+      An SLF4J binding. Flink logs through the SLF4J API but deliberately ships no
+      implementation, so without one it prints a "Failed to load class StaticLoggerBinder"
+      warning and swallows every log line. Version 1.7.36 to match the slf4j-api that
+      Flink pulls in - a 2.x binding would not attach to a 1.7 API.
+
+      runtime scope: no source file imports it, only the running JVM needs it.
+    -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-simple</artifactId>
+      <version>1.7.36</version>
+      <scope>runtime</scope>
+    </dependency>
+
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
-      <version>5.10.2</version>
+      <version>${junit.version}</version>
       <scope>test</scope>
     </dependency>
   </dependencies>
 
   <build>
     <plugins>
-      <!-- Runs the tests during `mvn test`. Pinned on purpose - see below. -->
+      <!-- Runs the tests during `mvn test`. Pinned so the version cannot drift. -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
