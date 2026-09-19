@@ -4,13 +4,18 @@ import com.anpr.platform.config.KafkaTopics;
 import com.anpr.platform.model.AnprEvent;
 import com.anpr.platform.model.CoLocationAlertEvent;
 import com.anpr.platform.serde.AnprEventDeserializationSchema;
+import com.anpr.platform.serde.CoLocationAlertSerializationSchema;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.state.v2.ValueState;
 import org.apache.flink.api.common.state.v2.ValueStateDescriptor;
 import org.apache.flink.api.common.typeinfo.Types;
+import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
+import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
@@ -52,7 +57,7 @@ public final class CoLocationJob {
                 .<AnprEvent>forBoundedOutOfOrderness(OUT_OF_ORDERNESS)
                 .withTimestampAssigner((event, recordTimestamp) -> event.eventTimeMillis);
 
-        env.fromSource(source, watermarks, KafkaTopics.ANPR_EVENTS)
+        DataStream<CoLocationAlertEvent> alerts = env.fromSource(source, watermarks, KafkaTopics.ANPR_EVENTS)
                 // NiFi already decided this. Filtering early keeps uninteresting traffic
                 // out of the windows entirely.
                 .filter(event -> event.watchlisted)
@@ -82,9 +87,11 @@ public final class CoLocationJob {
                 .enableAsyncState()
 
                 // Ensures the alert is emitted only once per incident
-                .process(new EmitOncePerIncident())
+                .process(new EmitOncePerIncident());
 
-                .print();
+        // Two sinks on one stream: the console is for the demo, Kafka is the delivery path.
+        alerts.print();
+        alerts.sinkTo(alertSink());
 
         env.execute("ANPR co-location correlation");
     }
@@ -220,6 +227,22 @@ public final class CoLocationJob {
             // Only the value matters - event time comes from inside the JSON,
             // not from the Kafka record's key or timestamp.
             .setValueOnlyDeserializer(new AnprEventDeserializationSchema())
+            .build();
+    }
+
+    private static KafkaSink<CoLocationAlertEvent> alertSink() {
+        return KafkaSink.<CoLocationAlertEvent>builder()
+            .setBootstrapServers(KafkaTopics.BOOTSTRAP_SERVERS)
+            .setRecordSerializer(KafkaRecordSerializationSchema.<CoLocationAlertEvent>builder()
+                .setTopic(KafkaTopics.ALERTS)
+                // No record key: one partition, and any keying scheme has to cover
+                // NiFi's SINGLE_MATCH too. Deferred until that shape exists.
+                .setValueSerializationSchema(new CoLocationAlertSerializationSchema())
+                .build())
+            // EXACTLY_ONCE would need checkpointing plus a transactional id prefix, and
+            // would hold alerts back until each checkpoint commits. A repeat after a
+            // restart is a nuisance, not a wrong answer.
+            .setDeliveryGuarantee(DeliveryGuarantee.AT_LEAST_ONCE)
             .build();
     }
 }
