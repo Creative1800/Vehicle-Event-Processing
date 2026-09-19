@@ -84,6 +84,21 @@ class JsonSchemaTest {
     }
 
     @Test
+    void tagsTheAlertWithItsType() {
+        // The "alerts" topic carries SINGLE_MATCH too, raised by NiFi without ever
+        // reaching Flink. NiFi's router reads this field to tell them apart.
+        CoLocationAlertEvent alert = new CoLocationAlertEvent(
+                "LOC-RING",
+                new LinkedHashSet<>(List.of("KE555ZT", "NIT77AB")),
+                new LinkedHashSet<>(List.of("CAM-01")),
+                1L, 2L);
+
+        String json = new String(outbound.serialize(alert), StandardCharsets.UTF_8);
+
+        assertTrue(json.contains("\"type\":\"CO_LOCATION\""), json);
+    }
+
+    @Test
     void doesNotPublishTheInternalDedupeKey() {
         // dedupeKey() is how this job recognises repeats. It is not part of the alert,
         // and it must not leak onto the topic as though it were.

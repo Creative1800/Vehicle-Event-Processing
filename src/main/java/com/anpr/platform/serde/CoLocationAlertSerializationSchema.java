@@ -9,7 +9,9 @@ import org.apache.flink.api.common.serialization.SerializationSchema;
  * Writes CoLocationAlertEvent as the JSON published to "alerts".
  *
  * dedupeKey() does not appear in the output: Jackson serializes public fields and bean
- * getters, and dedupeKey() is neither. The sets serialize as JSON arrays.
+ * getters, and dedupeKey() is neither. getType() is a bean getter, deliberately - that is
+ * how "type" reaches the topic without becoming a Flink field. The sets serialize as JSON
+ * arrays.
  */
 public class CoLocationAlertSerializationSchema
         implements SerializationSchema<CoLocationAlertEvent> {

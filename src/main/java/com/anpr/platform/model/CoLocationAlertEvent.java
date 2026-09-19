@@ -21,6 +21,9 @@ public class CoLocationAlertEvent {
      */
     private static final String DELIMITER = "|";
 
+    /** Discriminator on the "alerts" topic, which carries SINGLE_MATCH as well. */
+    public static final String TYPE = "CO_LOCATION";
+
     public String locationId;
     public Set<String> plates;
     public Set<String> cameraIds;
@@ -40,6 +43,15 @@ public class CoLocationAlertEvent {
         this.cameraIds = cameraIds;
         this.windowStartMillis = windowStartMillis;
         this.windowEndMillis = windowEndMillis;
+    }
+
+    /**
+     * A getter rather than a field: Jackson serializes it, so "type" reaches the topic,
+     * but Flink sees no extra field to carry through state and every shuffle. The value is
+     * constant - the class IS the type.
+     */
+    public String getType() {
+        return TYPE;
     }
 
     /**
