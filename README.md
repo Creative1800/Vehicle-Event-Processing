@@ -169,8 +169,10 @@ The raw fact: this plate, at this camera, at this instant. No interpretation. Ev
 downstream is derived from it, so it is the only thing in the system that is evidence
 rather than conclusion.
 
-Stood in for by two apps — `AnprEventPublisher` (one shot, reproducible, known answer) and
-`CameraSimulator` (continuous, for watching the system run live).
+The reproducible run is the pipeline itself: drop `sample-data/detections.csv` into
+`ingest/` and NiFi produces the twelve enriched events. `CameraSimulator` stands in for a
+live feed — continuous, synthetic, for watching the system run rather than demonstrating
+it.
 
 ### NiFi — ingest & enrich
 
@@ -258,8 +260,8 @@ Layering runs `app` → `correlate` → `{serde, data, config}` → `model`.
 | `data`      | `Watchlist`, `CameraRegistry`, the CSV readers. Narrow on purpose — `contains()` and `locationIdOf()`, nothing enumerable — so moving the watchlist into a database rewrites one method. |
 | `serde`     | The JSON that travels on the topics, pinned by tests rather than by schema strictness. |
 | `correlate` | Two implementations of one rule: a plain-Java prototype whose tests are the spec, and the Flink job that has to match it. |
-| `app`       | Feeds that bypass NiFi — a fixed twelve-event publisher and a continuous simulator, for exercising the Flink job on its own. |
-| `config`    | Topic names and producer settings, shared so the publishers cannot drift apart. |
+| `app`       | `CameraSimulator`, which bypasses NiFi to publish straight to `anpr-events` — a load generator for the Flink job, not an ingest path. The two console demos alongside it print alerts without Kafka. |
+| `config`    | Topic names and producer settings, kept out of the code that uses them so the topic names have one home. |
 
 The plain-Java prototype stays deliberately. It documents what the rule is without any
 framework in the way, and it is the reason the Flink job can be read as *"the same rule,
