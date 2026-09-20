@@ -6,12 +6,13 @@ import com.anpr.platform.model.Detection;
 import java.io.IOException;
 
 /**
- * The NiFi stand-in. A camera reports a plate at a camera at a time; this turns that into
+ * Enrichment in Java. A camera reports a plate at a camera at a time; this turns that into
  * the enriched event the "anpr-events" topic carries, by resolving where the camera stands
  * and whether the plate is wanted.
  *
- * This is the class that disappears when the real NiFi flow exists - nothing else in the
- * repository does enrichment, deliberately, so there is exactly one thing to replace.
+ * NiFi does this for the pipeline proper - two LookupRecord stages over these same CSVs.
+ * This survives because CameraSimulator publishes straight to Kafka, so the Flink job can
+ * be exercised without NiFi running. The two must agree; nifi/ is the reference.
  *
  * Note what is NOT here: the confidence a detection carries does not survive, because
  * AnprEvent has no field for it. The job tolerates it as an unknown field on the wire.
