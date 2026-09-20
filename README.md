@@ -7,6 +7,128 @@ interest, producing two kinds of alert:
 - **`CO_LOCATION`** — two or more *different* watchlisted vehicles were seen at the same
   location within 15 minutes.
 
+## Running it
+
+Needs **Docker Desktop** and **JDK 17**. Maven is not required — use the wrapper. NiFi
+brings its own Java 21 inside its container, so the two never meet.
+
+Every command is run from the project root; the sample-data paths are relative.
+
+### 1. Start the stack
+
+```powershell
+docker compose up -d
+```
+
+Kafka, the topic creator, and NiFi. NiFi needs two to three minutes before it answers —
+it looks hung and is not.
+
+### 2. Load the flow into NiFi
+
+Open **https://localhost:8443/nifi/** (accept the self-signed certificate) and log in with
+`admin` / `anpr-demo-password`.
+
+The canvas starts empty — the flow lives in this repository, not in the image:
+
+1. Drag a **Process Group** onto the canvas and **Browse** to `nifi/anpr-ingest-flow.json`.
+2. Open the imported group, then **enable every controller service** in it — readers,
+   writers, the two CSV lookups and the Kafka connection. Imported services arrive
+   disabled, and a processor whose service is disabled reports itself invalid without
+   saying why.
+3. Start every processor.
+
+### 3. Start the Flink job
+
+```powershell
+.\mvnw.cmd -q clean test
+.\mvnw.cmd -q dependency:build-classpath -Dmdep.outputFile=target/cp.txt
+java -cp "target/classes;$(Get-Content target/cp.txt)" com.anpr.platform.correlate.CoLocationJob
+```
+
+Leave it running. **Start it before the next step** — the job reads from the live edge of
+the topic, so anything published before it is up is never seen.
+
+`clean` deletes `target/cp.txt`, so rebuild the classpath after any `clean`.
+
+### 4. Trigger the pipeline
+
+In another terminal:
+
+```powershell
+Copy-Item sample-data\detections.csv ingest\
+```
+
+`GetFile` consumes the copy; `sample-data` is mounted read-only so the originals cannot be
+eaten.
+
+### 5. What should happen
+
+Twelve detections in, eight alerts out:
+
+```powershell
+docker exec anpr-kafka /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server kafka:19092 --topic anpr-events
+docker exec anpr-kafka /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server kafka:19092 --topic alerts
+```
+
+| topic | count | what it is |
+|-------|-------|------------|
+| `anpr-events` | **+12** | every valid detection, enriched — including the six that carry no alert |
+| `alerts` | **+6** | `SINGLE_MATCH`, raised by NiFi, never touched by Flink |
+| `alerts` | **+2** | `CO_LOCATION`, from the Flink job |
+
+The Flink console prints the two it found:
+
+```
+ALERT  CO_LOCATION  [KE555ZT, NIT77AB]    at LOC-RING     seen by [CAM-01, CAM-04]
+ALERT  CO_LOCATION  [TT9999OA, TT9999OP]  at LOC-D1-E12   seen by [CAM-02]
+```
+
+The first is the interesting one: two different watchlisted vehicles, five minutes apart,
+at **two different cameras that share a location**. That is the rule doing something no
+single record could answer.
+
+### Why twelve events and not six
+
+Flink discards non-watchlisted events in its first operator, so forwarding them looks
+wasteful. It is not. Watermarks are derived from the timestamps of arriving records, and
+the last row in `detections.csv` — `d-1012`, an unwatchlisted plate fifteen minutes after
+everything else — exists only to push event time past the final window so it can close.
+Filter those rows out at ingest and the second `CO_LOCATION` alert never appears.
+
+A heartbeat implemented in data. See *Known limitations*.
+
+### Live mode
+
+For a continuously running feed instead of the fixed twelve:
+
+```powershell
+java -cp "target/classes;$(Get-Content target/cp.txt)" com.anpr.platform.app.CameraSimulator
+```
+
+Thirty seconds of event time every 100 ms, so a fifteen-minute window closes in about
+three seconds. Every sixtieth event it stages two different watchlisted plates at one
+camera, producing a `CO_LOCATION` alert every few seconds. Ctrl+C to stop.
+
+This one bypasses NiFi and publishes to `anpr-events` directly — it exists to watch the
+correlation logic run, not to demonstrate the pipeline.
+
+### Resetting
+
+```powershell
+docker compose down; docker compose up -d
+```
+
+Kafka declares no volumes, so this empties both topics. NiFi's canvas is in a named volume
+and survives.
+
+**Do not add `-v`.** That deletes the named volumes too, and your imported flow with them.
+
+### In Git Bash instead of PowerShell
+
+Use `$(cat target/cp.txt)` for the classpath, and prefix every `docker exec` that names a
+container path with `MSYS_NO_PATHCONV=1`, or the `/opt/...` argument is rewritten into a
+Windows path before Docker sees it.
+
 ## Architecture
 
 ```
@@ -52,14 +174,19 @@ Stood in for by two apps — `AnprEventPublisher` (one shot, reproducible, known
 
 ### NiFi — ingest & enrich
 
-Three jobs: **validate** (drop malformed rows and unknown cameras), **enrich** (camera →
-location, plate → watchlisted), and **raise `SINGLE_MATCH` on the spot** — published
-straight to the `alerts` topic, never reaching Flink.
+Three jobs: **validate** (a detection from an unknown camera has no location, so it is
+dead-lettered rather than guessed), **enrich** (camera → location, plate → watchlisted),
+and **raise `SINGLE_MATCH` on the spot** — published straight to the `alerts` topic,
+never reaching Flink.
+
+Both lookups are `LookupRecord` stages against the same CSVs the Java code reads. The
+watchlist lookup's `matched`/`unmatched` split is what produces the `watchlisted` flag,
+and doubles as the routing that sends matched records on to `alerts`.
 
 Why NiFi rather than Flink: a single watchlisted plate needs no memory of anything. One
 record in, one decision out. That is a routing problem, and routing with retries,
 provenance and back-pressure is what NiFi is built for. Answering it in Flink would mean
-standing up a distributed stateful engine for a question `RouteOnAttribute` answers in one
+standing up a distributed stateful engine for a question two CSV lookups answer in one
 hop — and it would mean Flink needing the watchlist, which is the complexity described
 under *Correlate* below.
 
@@ -131,7 +258,7 @@ Layering runs `app` → `correlate` → `{serde, data, config}` → `model`.
 | `data`      | `Watchlist`, `CameraRegistry`, the CSV readers. Narrow on purpose — `contains()` and `locationIdOf()`, nothing enumerable — so moving the watchlist into a database rewrites one method. |
 | `serde`     | The JSON that travels on the topics, pinned by tests rather than by schema strictness. |
 | `correlate` | Two implementations of one rule: a plain-Java prototype whose tests are the spec, and the Flink job that has to match it. |
-| `app`       | The runnable stand-ins for NiFi's ingest half.                                 |
+| `app`       | Feeds that bypass NiFi — a fixed twelve-event publisher and a continuous simulator, for exercising the Flink job on its own. |
 | `config`    | Topic names and producer settings, shared so the publishers cannot drift apart. |
 
 The plain-Java prototype stays deliberately. It documents what the rule is without any
