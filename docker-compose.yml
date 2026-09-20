@@ -68,3 +68,47 @@ services:
         echo '--- topics ---'
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --list
     restart: "no"
+
+  # Ingest & enrich: validates detections, resolves camera -> location and plate ->
+  # watchlist, then publishes enriched events to anpr-events and SINGLE_MATCH to alerts.
+  nifi:
+    image: apache/nifi:2.12.0
+    container_name: anpr-nifi
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      # HTTPS only - NiFi 2.0 dropped plain HTTP, so NIFI_WEB_HTTP_PORT no longer exists.
+      # https://localhost:8443/nifi, past a self-signed certificate warning.
+      - "8443:8443"
+    environment:
+      # A demo credential, deliberately in the repo. NiFi silently generates a random
+      # password instead if this is under 12 characters, which locks you out of your own
+      # container.
+      SINGLE_USER_CREDENTIALS_USERNAME: admin
+      SINGLE_USER_CREDENTIALS_PASSWORD: anpr-demo-password
+
+      # Default is 1g claimed at boot. Lower start, same ceiling.
+      NIFI_JVM_HEAP_INIT: 512m
+      NIFI_JVM_HEAP_MAX: 1g
+    volumes:
+      # Named volumes, NOT bind mounts: a bind mount of an empty host directory would
+      # hide the image's nifi.properties and the container would not start. Docker seeds
+      # a named volume from the image instead.
+      - nifi-conf:/opt/nifi/nifi-current/conf                 # flow.json.gz - the canvas
+      - nifi-state:/opt/nifi/nifi-current/state
+      - nifi-database:/opt/nifi/nifi-current/database_repository
+
+      # Read-only: the lookup services read these repeatedly and must never consume them.
+      - ./sample-data:/opt/nifi/sample-data:ro
+
+      # GetFile DELETES what it picks up, so it gets its own directory. Run the demo with
+      #   cp sample-data/detections.csv ingest/
+      - ./ingest:/opt/nifi/ingest
+
+# Survive `docker compose down`, so the flow outlives a restart. Only `down -v` clears
+# them - and Kafka, having no volumes, resets either way.
+volumes:
+  nifi-conf:
+  nifi-state:
+  nifi-database:
