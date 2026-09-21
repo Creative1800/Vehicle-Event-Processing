@@ -62,14 +62,24 @@ the topic, so anything published before it is up is never seen.
 
 ### 4. Trigger the pipeline
 
-In another terminal:
+In another terminal, replay the feed as the cameras would send it:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run-cameras.ps1
+```
+
+The script drops one detection per file into `ingest/`, in timestamp order, three seconds
+apart, and prints each one as it goes. `-ExecutionPolicy Bypass` applies to this one run
+only; it does not change the machine's policy.
+
+Or drop the whole file at once:
 
 ```powershell
 Copy-Item sample-data\detections.csv ingest\
 ```
 
-`GetFile` consumes the copy; `sample-data` is mounted read-only so the originals cannot be
-eaten.
+Both give the same result. `GetFile` consumes what lands in `ingest/`; `sample-data` is
+mounted read-only so the originals cannot be eaten.
 
 ### 5. What should happen
 

@@ -20,6 +20,8 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
 import org.apache.flink.streaming.api.windowing.assigners.SlidingEventTimeWindows;
+import org.apache.flink.streaming.api.windowing.triggers.Trigger;
+import org.apache.flink.streaming.api.windowing.triggers.TriggerResult;
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.util.Collector;
 
@@ -72,6 +74,9 @@ public final class CoLocationJob {
                 // them. The cost is that one event belongs to ~15 windows.
                 .window(SlidingEventTimeWindows.of(WINDOW_SIZE, WINDOW_SLIDE))
 
+                // Report on arrival, not when the window closes - see FireOnEveryEvent.
+                .trigger(new FireOnEveryEvent())
+
                 .process(new CoLocationWindow())
 
                 // The stream stops being keyed by LOCATION here and starts being keyed by
@@ -94,6 +99,47 @@ public final class CoLocationJob {
         alerts.sinkTo(alertSink());
 
         env.execute("ANPR co-location correlation");
+    }
+
+    /**
+     * Fires the window on every event, instead of once when the watermark passes its end.
+     *
+     * Safe because a co-location can only be confirmed, never undone: later events add
+     * plates, they never take one away. So there is nothing to wait for - the alert goes
+     * out the moment the second plate arrives, with no out-of-orderness delay and no need
+     * for a later event to close the window.
+     *
+     * FIRE, not FIRE_AND_PURGE: the window keeps its contents, so the next event is judged
+     * against everything seen so far. Every open window holding a pair re-reports it on
+     * each event; EmitOncePerIncident swallows the repeats.
+     */
+    private static final class FireOnEveryEvent extends Trigger<Object, TimeWindow> {
+
+        @Override
+        public TriggerResult onElement(Object event,
+                                       long timestamp,
+                                       TimeWindow window,
+                                       TriggerContext context) {
+            // The window's end, so onEventTime gets a chance to drop its contents.
+            context.registerEventTimeTimer(window.maxTimestamp());
+            return TriggerResult.FIRE;
+        }
+
+        /** Purge without firing: everything in this window has already been reported. */
+        @Override
+        public TriggerResult onEventTime(long time, TimeWindow window, TriggerContext context) {
+            return time == window.maxTimestamp() ? TriggerResult.PURGE : TriggerResult.CONTINUE;
+        }
+
+        @Override
+        public TriggerResult onProcessingTime(long time, TimeWindow window, TriggerContext context) {
+            return TriggerResult.CONTINUE;
+        }
+
+        @Override
+        public void clear(TimeWindow window, TriggerContext context) {
+            context.deleteEventTimeTimer(window.maxTimestamp());
+        }
     }
 
     /**
