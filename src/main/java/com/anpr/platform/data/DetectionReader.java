@@ -12,8 +12,9 @@ import java.util.List;
 /**
  * Turns the detections file into Detection objects.
  *
- * The only class that knows the events are stored as CSV. When they arrive as JSON
- * from Kafka later, this is the class that changes - nothing else.
+ * The only Java class that reads the detections CSV, and it serves the console demos
+ * only. In the pipeline, NiFi reads the CSV and Flink receives JSON through
+ * AnprEventDeserializationSchema.
  */
 public final class DetectionReader {
 
