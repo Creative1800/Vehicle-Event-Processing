@@ -139,6 +139,39 @@ Filter those rows out at ingest and the second `CO_LOCATION` alert never appears
 
 A heartbeat implemented in data. See *Known limitations*.
 
+### A second feed
+
+`sample-data/detections-b.csv` is ten more detections, 09:40–10:15 — every one later than
+the last event in `detections.csv`, so it can follow the first run without restarting the
+Flink job. It exercises three things the first file never does:
+
+| rows | what they show |
+|------|----------------|
+| `d-2002`, `d-2004` | `CO_LOCATION` at `LOC-OLDTOWN` — two watchlisted plates at the **same** camera |
+| `d-2006`, `d-2007` | `CO_LOCATION` at `LOC-RING` — two plates on **two** cameras that share one location |
+| `d-2008` | `CAM-09` is not in `cameras.csv`, so the detection is dead-lettered and never published |
+
+Two near-misses are there on purpose. `d-2001` and `d-2009` share `LOC-D1-E12`, but
+`ZA482KL` is not watchlisted, so there is no pair. And `d-2010` puts `MN667PL` at
+`LOC-RING` 16 minutes after `d-2007` — one minute outside the window. It also serves as the
+heartbeat that moves event time past the last window so it can close.
+
+```powershell
+Copy-Item sample-data\detections-b.csv ingest\
+```
+
+| where | expect |
+|-------|--------|
+| `anpr-events` | **+9** — ten rows, minus `d-2008` |
+| `alerts` | **+6** `SINGLE_MATCH`, **+2** `CO_LOCATION` |
+| `data-out/alerts/co-location/` | `…_LOC-OLDTOWN_BA123XY-KE555ZT.json`, `…_LOC-RING_TT9999OP-NIT77AB.json` |
+| ingest canvas | one flowfile queued on the camera lookup's `unmatched` funnel |
+
+**Run the two files one after the other, never together.** Dropped at once, NiFi does not
+guarantee which it publishes first. If the second file reaches Kafka first, the watermark
+jumps to 10:15, and every row of the first file then arrives late and is dropped — its
+two `CO_LOCATION` alerts never fire.
+
 ### Live mode
 
 For a continuously running feed instead of the fixed twelve:
