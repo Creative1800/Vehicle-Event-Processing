@@ -24,3 +24,7 @@ Thumbs.db
 # NiFi ingest drop directory - GetFile consumes what lands here
 ingest/*
 !ingest/.gitkeep
+
+# NiFi alert & event output - regenerated on every run
+data-out/*
+!data-out/.gitkeep

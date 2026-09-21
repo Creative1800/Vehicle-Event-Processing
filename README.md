@@ -23,25 +23,35 @@ docker compose up -d
 Kafka, the topic creator, and NiFi. NiFi needs two to three minutes before it answers —
 it looks hung and is not.
 
-### 2. Load the flow into NiFi
+### 2. Load the flows into NiFi
 
 Open **https://localhost:8443/nifi/** (accept the self-signed certificate) and log in with
 `admin` / `anpr-demo-password`.
 
-The canvas starts empty — the flow lives in this repository, not in the image:
+The canvas starts empty — the flows live in this repository, not in the image. There are
+two, one per NiFi stage:
 
 1. Drag a **Process Group** onto the canvas and **Browse** to `nifi/anpr-ingest-flow.json`.
-2. Open the imported group, then **enable every controller service** in it — readers,
+2. Drag a second **Process Group** and **Browse** to `nifi/anpr-route-deliver-flow.json`.
+3. Open each group in turn and **enable every controller service inside it** — readers,
    writers, the two CSV lookups and the Kafka connection. Imported services arrive
    disabled, and a processor whose service is disabled reports itself invalid without
-   saying why.
-3. Start every processor.
+   saying which one.
+4. Start every processor in both groups.
+
+Both flows carry their own copy of `Kafka3ConnectionService`, so each group is
+self-contained and the import order does not matter. Enable the service *inside* each
+group rather than looking for one shared between them.
+
+**Start route & deliver before step 4.** Its `ConsumeKafka` reads from `latest`, so alerts
+published while it is stopped are never delivered to disk — the same live-edge rule as the
+Flink job.
 
 ### 3. Start the Flink job
 
 ```powershell
 .\mvnw.cmd -q clean test
-.\mvnw.cmd -q dependency:build-classpath -Dmdep.outputFile=target/cp.txt
+.\mvnw.cmd -q dependency:build-classpath "-Dmdep.outputFile=target/cp.txt"
 java -cp "target/classes;$(Get-Content target/cp.txt)" com.anpr.platform.correlate.CoLocationJob
 ```
 
@@ -86,6 +96,38 @@ ALERT  CO_LOCATION  [TT9999OA, TT9999OP]  at LOC-D1-E12   seen by [CAM-02]
 The first is the interesting one: two different watchlisted vehicles, five minutes apart,
 at **two different cameras that share a location**. That is the rule doing something no
 single record could answer.
+
+### Where the alerts land
+
+Route & deliver splits the `alerts` topic by type and writes one file per alert:
+
+```
+data-out/alerts/
+├── co-location/
+│   ├── 0805_LOC-RING_KE555ZT-NIT77AB.json
+│   └── 0856_LOC-D1-E12_TT9999OP-TT9999OA.json
+└── single-match/
+    ├── 0813_BA123XY_d-1002.json    0841_KE555ZT_d-1008.json
+    ├── 0814_KE555ZT_d-1003.json    0910_TT9999OA_d-1011.json
+    └── 0819_NIT77AB_d-1005.json    0910_TT9999OP_d-1010.json
+```
+
+```powershell
+Get-ChildItem -Recurse data-out\alerts | Select-Object Directory, Name
+```
+
+The directory is the fan-out and the filename is the summary, so `ls` answers "what
+happened" without opening anything. Single-match names lead with the detection's own
+timestamp; co-location names lead with the **window start**, because that alert's evidence
+is an interval rather than an instant.
+
+`data-out/` is a bind mount declared in `docker-compose.yml` — NiFi writes to
+`/opt/nifi/data-out` inside the container and the same files appear here. The directory is
+git-ignored; only `.gitkeep` is tracked.
+
+Writes use `replace` conflict resolution, so re-running the demo overwrites rather than
+failing. Re-running produces the six `SINGLE_MATCH` files again but **no** new
+`CO_LOCATION` unless the Flink job is restarted first — see *Known limitations*.
 
 ### Why twelve events and not six
 

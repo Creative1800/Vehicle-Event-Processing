@@ -106,6 +106,9 @@ services:
       #   cp sample-data/detections.csv ingest/
       - ./ingest:/opt/nifi/ingest
 
+      # PutFile writes alerts and the event archive here; read them on the host.
+      - ./data-out:/opt/nifi/data-out
+
 # Survive `docker compose down`, so the flow outlives a restart. Only `down -v` clears
 # them - and Kafka, having no volumes, resets either way.
 volumes:
