@@ -315,15 +315,14 @@ two destinations — which is what makes the two alert types one system rather t
 
 ## Code layout
 
-Layering runs `app` → `correlate` → `{serde, data, config}` → `model`.
+Layering runs `correlate` → `{serde, data, config}` → `model`.
 
 | package     | what it holds                                                                 |
 |-------------|-------------------------------------------------------------------------------|
 | `model`     | `Detection`, `AnprEvent`, the alert types. No framework imports at all, so the domain does not depend on the plumbing. |
-| `data`      | `Watchlist`, `CameraRegistry`, the CSV readers. Narrow on purpose — `contains()` and `locationIdOf()`, nothing enumerable — so moving the watchlist into a database rewrites one method. |
+| `data`      | `Watchlist` and `CameraRegistry`, the lookups the prototype runs against. Narrow on purpose — `contains()` and `locationIdOf()`, nothing enumerable — so a database-backed version only has to build one through `of()`. |
 | `serde`     | The JSON that travels on the topics, pinned by tests rather than by schema strictness. |
 | `correlate` | Two implementations of one rule: a plain-Java prototype whose tests are the spec, and the Flink job that has to match it. |
-| `app`       | A console demo, `CoLocationAlerts`, that runs the plain-Java prototype over the sample CSVs and prints what it finds — no Kafka, no Docker. It is not a way into the pipeline. |
 | `config`    | Topic names and the broker address the Flink job connects to. |
 
 The plain-Java prototype stays deliberately. It documents what the rule is without any

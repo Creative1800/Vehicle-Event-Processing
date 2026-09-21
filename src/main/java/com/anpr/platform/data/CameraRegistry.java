@@ -1,10 +1,5 @@
 package com.anpr.platform.data;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -34,11 +29,6 @@ public final class CameraRegistry {
         return new CameraRegistry(Map.copyOf(cameraToLocation), Map.copyOf(locationNames));
     }
 
-    /** Parses the two CSVs, then hands the maps to of(). */
-    public static CameraRegistry loadFrom(Path camerasFile, Path locationsFile) throws IOException {
-        return of(readKeyValue(camerasFile), readKeyValue(locationsFile));
-    }
-
     /** Returns null when the camera is not in the registry. */
     public String locationIdOf(String cameraId) {
         return cameraToLocation.get(cameraId);
@@ -49,17 +39,5 @@ public final class CameraRegistry {
             return "unknown location";
         }
         return locationNames.getOrDefault(locationId, locationId);
-    }
-
-    private static Map<String, String> readKeyValue(Path file) throws IOException {
-        List<String> lines = Files.readAllLines(file);
-
-        Map<String, String> map = new HashMap<>();
-        for (int i = 1; i < lines.size(); i++) {
-            String[] columns = lines.get(i).split(",");
-            map.put(columns[0], columns[1]);
-        }
-
-        return map;
     }
 }
