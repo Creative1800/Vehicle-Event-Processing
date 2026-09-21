@@ -121,6 +121,11 @@ happened" without opening anything. Single-match names lead with the detection's
 timestamp; co-location names lead with the **window start**, because that alert's evidence
 is an interval rather than an instant.
 
+Alerts name places by `locationId` — `LOC-RING`, not *Ring Road / Mlynske Nivy*. `data-out/`
+is where this pipeline hands off, and turning an ID into a display name belongs to whatever
+shows the alerts to a person. `sample-data/locations.csv` is that mapping; nothing in the
+pipeline reads it.
+
 `data-out/` is a bind mount declared in `docker-compose.yml` — NiFi writes to
 `/opt/nifi/data-out` inside the container and the same files appear here. The directory is
 git-ignored; only `.gitkeep` is tracked.
@@ -312,6 +317,10 @@ Two shapes on one topic, so each carries a discriminator:
 
 Fan-out on `type`, which is exactly what `RouteOnAttribute` is for. One input, one router,
 two destinations — which is what makes the two alert types one system rather than two.
+
+It delivers what it receives and adds nothing. Location names stay out of the files for the
+same reason they stay out of Kafka: an ID is stable and a name is display text, so it is
+resolved by the consumer from `sample-data/locations.csv`.
 
 ## Code layout
 

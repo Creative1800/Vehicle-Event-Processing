@@ -43,9 +43,7 @@ class CoLocationDetectorTest {
     private static final CameraRegistry CAMERAS = CameraRegistry.of(
             Map.of("CAM-01", "LOC-RING",
                     "CAM-04", "LOC-RING",
-                    "CAM-02", "LOC-EXIT"),
-            Map.of("LOC-RING", "Ring Road",
-                    "LOC-EXIT", "Exit 12"));
+                    "CAM-02", "LOC-EXIT"));
 
     private CoLocationDetector detector;
 

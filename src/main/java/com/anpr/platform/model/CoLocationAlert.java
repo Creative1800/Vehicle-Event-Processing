@@ -15,8 +15,8 @@ import java.util.Set;
  * one place - and a streaming alert cannot.
  *
  * Carries a locationId rather than the location's name. The name is for humans reading
- * output, so whoever prints an alert looks it up in the CameraRegistry - that keeps
- * display text out of the alert, and later out of Kafka.
+ * output, so it is resolved by whatever displays the alert, from locations.csv - that
+ * keeps display text out of the alert, out of Kafka, and out of the delivered files.
  *
  * Immutable: the compact constructor below copies the sets it is given, so an alert
  * cannot be changed from a distance once it exists.
