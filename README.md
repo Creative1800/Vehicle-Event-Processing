@@ -161,7 +161,7 @@ windows, so they are cleared and `EmitOncePerIncident` forgets the incidents it 
 Filter those rows out at ingest and the alerts still appear; the state behind them just
 never goes away.
 
-A heartbeat implemented in data. See *Known limitations*.
+A heartbeat implemented in data.
 
 ### A second feed
 
@@ -212,6 +212,22 @@ and survives.
 Use `$(cat target/cp.txt)` for the classpath, and prefix every `docker exec` that names a
 container path with `MSYS_NO_PATHCONV=1`, or the `/opt/...` argument is rewritten into a
 Windows path before Docker sees it.
+
+### On macOS or Linux
+
+Steps 1, 2 and 5 are the same. Step 3 uses the shell wrapper and a `:` classpath separator:
+
+```bash
+./mvnw -q clean test
+./mvnw -q dependency:build-classpath -Dmdep.outputFile=target/cp.txt
+java -cp "target/classes:$(cat target/cp.txt)" com.anpr.platform.correlate.CoLocationJob
+```
+
+Step 4 is a copy — `run-cameras.ps1` is written for Windows PowerShell:
+
+```bash
+cp sample-data/detections.csv ingest/
+```
 
 ## Architecture
 
@@ -365,14 +381,27 @@ The plain-Java prototype stays deliberately. It documents what the rule is witho
 framework in the way, and it is the reason the Flink job can be read as *"the same rule,
 but able to remember"*.
 
+## Assumptions
+
+- **"A short period" is 15 minutes, and "multiple vehicles" is two or more *different*
+  watchlisted plates.** The same plate seen twice is one vehicle. A third plate joining a
+  pair is a new combination, so it raises a second alert.
+- **"The same location" means the same `locationId`, not the same camera.** `cameras.csv`
+  maps each camera to a location, and two cameras can share one — `CAM-01` and `CAM-04` are
+  both `LOC-RING`.
+- **Time is when the camera saw the vehicle, not when the data arrived.** Detections may
+  arrive up to 30 seconds out of order; anything later than that is dropped.
+- **Plates are compared exactly as read.** There is no fuzzy matching for misreads —
+  `TT9999OP` and `TT9999OA` are two different vehicles.
+- **Every detection is trusted.** `confidence` is read but not used as a threshold.
+- **A detection from a camera not in `cameras.csv` is dead-lettered, not alerted** — it has
+  no location, so it cannot be correlated, and the watchlist is never consulted for it.
+- **The watchlist and camera list are static CSVs** in `sample-data/`, read by NiFi's
+  lookup services.
+
 ## Known limitations
 
 - **The watchlist flag is point-in-time.** A plate added to the watchlist at 10:00 does not
   retroactively flag events published before 10:00, even if a window covering them is
   still open. Acceptable for an investigative platform, which cares about vehicles of
   interest going forward; the production answer is broadcast state in the Flink job.
-- **Window state is only freed once event time has passed the window.** Watermarks are
-  derived from the data, so a stream that goes quiet keeps its last windows, and the
-  incidents `EmitOncePerIncident` remembers, in memory. The alerts themselves are not
-  delayed. The production answer is a heartbeat from ingest, so event time advances even
-  when no camera sees anything.
