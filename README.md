@@ -127,7 +127,9 @@ git-ignored; only `.gitkeep` is tracked.
 
 Writes use `replace` conflict resolution, so re-running the demo overwrites rather than
 failing. Re-running produces the six `SINGLE_MATCH` files again but **no** new
-`CO_LOCATION` unless the Flink job is restarted first — see *Known limitations*.
+`CO_LOCATION` unless the Flink job is restarted first. The job's watermark has already
+moved past those events, so the second copy arrives late and is dropped before any window
+sees it. A restart clears the watermark, because the job keeps no checkpoints.
 
 ### Why twelve events and not six
 
@@ -258,11 +260,14 @@ does.
 
 The buffer, and the seam. It does three things nothing else in the design does:
 
-- **Decouples lifetimes.** NiFi can restart while Flink runs, and the reverse. The
-  publisher can finish and exit; the job can start an hour later and still see everything.
+- **Decouples lifetimes.** NiFi keeps publishing while Flink is down, and Flink keeps
+  running while NiFi restarts. One trade-off is deliberate: the job starts at the live edge
+  of the topic, so events published while it is down are not correlated when it comes back.
+  It reports what is happening now, not a backlog.
 - **Absorbs bursts.** Rush hour does not back-pressure the cameras.
-- **Makes replay possible.** The topic is the record. Re-run the job over the same offsets
-  and, because correlation is by event time, the alerts are identical.
+- **Keeps the record.** Every event stays on the topic, so replay is available, though not
+  wired up here. Started from an earlier offset with fresh state, the job would recompute
+  the same alerts, because correlation runs on event time rather than arrival time.
 
 That last property is what makes the system testable rather than merely runnable.
 
@@ -318,7 +323,7 @@ Layering runs `app` → `correlate` → `{serde, data, config}` → `model`.
 | `data`      | `Watchlist`, `CameraRegistry`, the CSV readers. Narrow on purpose — `contains()` and `locationIdOf()`, nothing enumerable — so moving the watchlist into a database rewrites one method. |
 | `serde`     | The JSON that travels on the topics, pinned by tests rather than by schema strictness. |
 | `correlate` | Two implementations of one rule: a plain-Java prototype whose tests are the spec, and the Flink job that has to match it. |
-| `app`       | Two console demos, `SingleMatchAlerts` and `CoLocationAlerts`, that print each alert type straight from the sample CSVs — no Kafka, no Docker. Neither is a way into the pipeline. |
+| `app`       | A console demo, `CoLocationAlerts`, that runs the plain-Java prototype over the sample CSVs and prints what it finds — no Kafka, no Docker. It is not a way into the pipeline. |
 | `config`    | Topic names and the broker address the Flink job connects to. |
 
 The plain-Java prototype stays deliberately. It documents what the rule is without any

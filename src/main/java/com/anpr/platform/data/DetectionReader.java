@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * Turns the detections file into Detection objects.
  *
- * The only Java class that reads the detections CSV, and it serves the console demos
+ * The only Java class that reads the detections CSV, and it serves the console demo
  * only. In the pipeline, NiFi reads the CSV and Flink receives JSON through
  * AnprEventDeserializationSchema.
  */
