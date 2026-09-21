@@ -181,7 +181,7 @@ public final class CoLocationJob {
 
     /**
      * Lets the FIRST alert for an incident through and swallows every later window that
-     * reports the same one. This is what turns 25 printed alerts into 2.
+     * reports the same one. This is what turns dozens of printed alerts into 2.
      *
      * Keyed by incident rather than by location - see the second keyBy above. The window
      * operator decides whether plates were co-located; this one decides whether we have

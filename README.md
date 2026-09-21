@@ -114,8 +114,8 @@ Route & deliver splits the `alerts` topic by type and writes one file per alert:
 ```
 data-out/alerts/
 ├── co-location/
-│   ├── 0805_LOC-RING_KE555ZT-NIT77AB.json
-│   └── 0856_LOC-D1-E12_TT9999OP-TT9999OA.json
+│   ├── 0814_LOC-RING_KE555ZT-NIT77AB.json
+│   └── 0910_LOC-D1-E12_TT9999OP-TT9999OA.json
 └── single-match/
     ├── 0813_BA123XY_d-1002.json    0841_KE555ZT_d-1008.json
     ├── 0814_KE555ZT_d-1003.json    0910_TT9999OA_d-1011.json
@@ -129,7 +129,8 @@ Get-ChildItem -Recurse data-out\alerts | Select-Object Directory, Name
 The directory is the fan-out and the filename is the summary, so `ls` answers "what
 happened" without opening anything. Single-match names lead with the detection's own
 timestamp; co-location names lead with the **window start**, because that alert's evidence
-is an interval rather than an instant.
+is an interval rather than an instant. The window reported is the one that starts on the
+minute of the earlier sighting — `0814`, where `KE555ZT` was seen at 08:14:02.
 
 Alerts name places by `locationId` — `LOC-RING`, not *Ring Road / Mlynske Nivy*. `data-out/`
 is where this pipeline hands off, and turning an ID into a display name belongs to whatever
@@ -149,10 +150,16 @@ sees it. A restart clears the watermark, because the job keeps no checkpoints.
 ### Why twelve events and not six
 
 Flink discards non-watchlisted events in its first operator, so forwarding them looks
-wasteful. It is not. Watermarks are derived from the timestamps of arriving records, and
-the last row in `detections.csv` — `d-1012`, an unwatchlisted plate fifteen minutes after
-everything else — exists only to push event time past the final window so it can close.
-Filter those rows out at ingest and the second `CO_LOCATION` alert never appears.
+wasteful. It is not. Watermarks are derived from the timestamps of every arriving record,
+watchlisted or not, and the watermark decides which events count as late and when a
+window's state can be let go.
+
+The alerts do not wait for it — a window reports the moment its second plate arrives (see
+*Flink — correlate*). But the last row in `detections.csv` — `d-1012`, an unwatchlisted
+plate fifteen minutes after everything else — is what moves event time past the final
+windows, so they are cleared and `EmitOncePerIncident` forgets the incidents it reported.
+Filter those rows out at ingest and the alerts still appear; the state behind them just
+never goes away.
 
 A heartbeat implemented in data. See *Known limitations*.
 
@@ -171,7 +178,7 @@ Flink job. It exercises three things the first file never does:
 Two near-misses are there on purpose. `d-2001` and `d-2009` share `LOC-D1-E12`, but
 `ZA482KL` is not watchlisted, so there is no pair. And `d-2010` puts `MN667PL` at
 `LOC-RING` 16 minutes after `d-2007` — one minute outside the window. It also serves as the
-heartbeat that moves event time past the last window so it can close.
+heartbeat that moves event time past the last windows so they are cleared.
 
 ```powershell
 Copy-Item sample-data\detections-b.csv ingest\
@@ -297,6 +304,16 @@ That is four capabilities at once: keyed state, event time, watermarks and timer
 is in this design for that rule and nothing else. The job does not validate, enrich or
 look anything up; `filter(watchlisted)` is an early discard, not a decision.
 
+**A window reports on every event, not when it closes.** By default a window fires once,
+when the watermark passes its end — so an alert would wait for a later event to arrive,
+and a stream that went quiet would never report its last pair. Here a custom trigger,
+`FireOnEveryEvent`, fires the window each time an event lands in it and keeps its
+contents. That is safe because a co-location can only be confirmed, never undone: later
+events add plates, they never take one away. The alert goes out the moment the second
+plate arrives. Every open window holding the pair re-reports it on each event, and
+`EmitOncePerIncident` swallows the repeats. The watermark still decides when a window is
+cleared.
+
 The job trusts the `watchlisted` flag on the wire rather than re-checking it. Re-checking
 would require the watchlist inside Flink as broadcast state — a second stream of watchlist
 updates connected to the main stream — which is the single largest complexity this design
@@ -319,8 +336,8 @@ Two shapes on one topic, so each carries a discriminator:
 
 ```json
 {"type":"CO_LOCATION","locationId":"LOC-RING","plates":["KE555ZT","NIT77AB"],
- "cameraIds":["CAM-01","CAM-04"],
- "windowStartMillis":1758182700000,"windowEndMillis":1758183600000}
+ "cameraIds":["CAM-04","CAM-01"],
+ "windowStartMillis":1789719240000,"windowEndMillis":1789720140000}
 ```
 
 ### NiFi — route & deliver
@@ -354,7 +371,8 @@ but able to remember"*.
   retroactively flag events published before 10:00, even if a window covering them is
   still open. Acceptable for an investigative platform, which cares about vehicles of
   interest going forward; the production answer is broadcast state in the Flink job.
-- **An alert cannot be raised until event time has passed the window.** Watermarks are
-  derived from the data, so a stream that goes quiet reports nothing about its final
-  window. The production answer is a heartbeat from ingest, so event time advances even
+- **Window state is only freed once event time has passed the window.** Watermarks are
+  derived from the data, so a stream that goes quiet keeps its last windows, and the
+  incidents `EmitOncePerIncident` remembers, in memory. The alerts themselves are not
+  delayed. The production answer is a heartbeat from ingest, so event time advances even
   when no camera sees anything.
