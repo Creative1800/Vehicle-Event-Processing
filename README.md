@@ -172,21 +172,6 @@ guarantee which it publishes first. If the second file reaches Kafka first, the 
 jumps to 10:15, and every row of the first file then arrives late and is dropped — its
 two `CO_LOCATION` alerts never fire.
 
-### Live mode
-
-For a continuously running feed instead of the fixed twelve:
-
-```powershell
-java -cp "target/classes;$(Get-Content target/cp.txt)" com.anpr.platform.app.CameraSimulator
-```
-
-Thirty seconds of event time every 100 ms, so a fifteen-minute window closes in about
-three seconds. Every sixtieth event it stages two different watchlisted plates at one
-camera, producing a `CO_LOCATION` alert every few seconds. Ctrl+C to stop.
-
-This one bypasses NiFi and publishes to `anpr-events` directly — it exists to watch the
-correlation logic run, not to demonstrate the pipeline.
-
 ### Resetting
 
 ```powershell
@@ -244,10 +229,8 @@ The raw fact: this plate, at this camera, at this instant. No interpretation. Ev
 downstream is derived from it, so it is the only thing in the system that is evidence
 rather than conclusion.
 
-The reproducible run is the pipeline itself: drop `sample-data/detections.csv` into
-`ingest/` and NiFi produces the twelve enriched events. `CameraSimulator` stands in for a
-live feed — continuous, synthetic, for watching the system run rather than demonstrating
-it.
+The sample CSVs stand in for them: drop one into `ingest/` and NiFi takes it from there.
+There is no second way in — every detection enters the system through NiFi.
 
 ### NiFi — ingest & enrich
 
@@ -335,8 +318,8 @@ Layering runs `app` → `correlate` → `{serde, data, config}` → `model`.
 | `data`      | `Watchlist`, `CameraRegistry`, the CSV readers. Narrow on purpose — `contains()` and `locationIdOf()`, nothing enumerable — so moving the watchlist into a database rewrites one method. |
 | `serde`     | The JSON that travels on the topics, pinned by tests rather than by schema strictness. |
 | `correlate` | Two implementations of one rule: a plain-Java prototype whose tests are the spec, and the Flink job that has to match it. |
-| `app`       | `CameraSimulator`, which bypasses NiFi to publish straight to `anpr-events` — a load generator for the Flink job, not an ingest path. The two console demos alongside it print alerts without Kafka. |
-| `config`    | Topic names and producer settings, kept out of the code that uses them so the topic names have one home. |
+| `app`       | Two console demos, `SingleMatchAlerts` and `CoLocationAlerts`, that print each alert type straight from the sample CSVs — no Kafka, no Docker. Neither is a way into the pipeline. |
+| `config`    | Topic names and the broker address the Flink job connects to. |
 
 The plain-Java prototype stays deliberately. It documents what the rule is without any
 framework in the way, and it is the reason the Flink job can be read as *"the same rule,

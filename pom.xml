@@ -30,13 +30,6 @@
       built for Flink 2.2. This is the pairing the flink.version above exists to satisfy.
     -->
     <flink.kafka.version>5.0.0-2.2</flink.kafka.version>
-    <!--
-      Already on the classpath transitively via flink-connector-kafka. Declared
-      explicitly because the publisher imports KafkaProducer directly, and code
-      should not compile against a dependency it did not ask for. Same version
-      the connector resolves to, so nothing on the classpath changes.
-    -->
-    <kafka.clients.version>4.2.0</kafka.clients.version>
 
     <!--
       Matches the version Flink shades internally. Flink ships only flink-shaded-jackson,
@@ -110,13 +103,6 @@
       <artifactId>junit-jupiter</artifactId>
       <version>${junit.version}</version>
       <scope>test</scope>
-    </dependency>
-
-    <!-- The standalone producer used by the publisher that stands in for NiFi. -->
-    <dependency>
-      <groupId>org.apache.kafka</groupId>
-      <artifactId>kafka-clients</artifactId>
-      <version>${kafka.clients.version}</version>
     </dependency>
   </dependencies>
 
